@@ -1,0 +1,8 @@
+python-dotenv
+aiohttp
+datetime
+requests
+Wikipedia-API
+yt_dlp
+youtube-search
+pynacl

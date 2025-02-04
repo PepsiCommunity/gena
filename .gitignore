@@ -1,0 +1,5 @@
+/nextcord
+/__pycache__
+/.env
+/roles.json
+/docker*
