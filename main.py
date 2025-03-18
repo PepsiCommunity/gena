@@ -1,3 +1,4 @@
+import re
 import nextcord
 from nextcord.ext import commands
 import os
@@ -10,6 +11,9 @@ import json
 import time
 import aiohttp
 import asyncio
+import emoji
+import io
+from mi.gen import generate_mi
 
 load_dotenv()
 API_TOKEN = os.getenv("TOKEN")
@@ -18,6 +22,8 @@ guild = nextcord.Guild
 client = commands.Bot(intents=nextcord.Intents.all())
 music_class: Music = Music(client)
 
+with open('model.json', 'r', encoding='utf-8') as f:
+    text_model = json.load(f)
 
 roles_channel_id = 1177321519169421393  # id канала ролей
 server_id = 1176560233984831591  # Id сервера
@@ -63,6 +69,7 @@ descriptions = [
     "Цветастые ники!",
 ]
 
+
 voice_channels: dict[int, Voice] = {}
 
 
@@ -83,6 +90,8 @@ async def on_ready():
                 "Authorization": "Bot " + os.getenv("TOKEN"),
             },
         )
+
+    print('Online')
 
 
 @client.event
@@ -113,6 +122,66 @@ async def on_member_join(member: nextcord.Member):
                 await member.add_roles(role)
             except:
                 pass
+
+
+@client.event
+async def on_member_remove(member: nextcord.Member):
+    messages = [
+        f"До свидания, {member.mention}",
+        f"{member.mention} растворился",
+        f"{member.mention} пропал",
+        f"{member.mention} завершил процесс",
+        f"{member.mention} словил segmentation fault",
+        f"{member.mention} отправил SIGTERM самому себе",
+        f"{member.mention} выполнил rm -rf / --no-preserve-root",
+        f"{member.mention} поймал fatal error и завершился",
+        f"{member.mention} завис и был принудительно завершён",
+        f"{member.mention} закоммитил своё последнее изменение",
+        f"{member.mention} отправился в /dev/null",
+        f"{member.mention} выполнил rage quit()",
+        f"{member.mention} отключился от сервера",
+        f"{member.mention} закрыл последний тег </life>",
+        f"{member.mention} не прошёл unit-тесты на выживание",
+        f"{member.mention} словил 404: User Not Found",
+        f"{member.mention} получил Error 410: Gone",
+        f"{member.mention} отключился с кодом 0",
+        f"{member.mention} ушёл в офлайн-мод",
+        f"{member.mention} откатил себя до предыдущей версии",
+        f"{member.mention} поймал BSOD и ушёл в перезагрузку",
+        f"{member.mention} сделал git push --force в реальную жизнь",
+        f"{member.mention} выполнил exit() без return",
+        f"{member.mention} словил NullPointerException",
+        f"{member.mention} достиг end of file",
+        f"{member.mention} был удалён из базы данных",
+        f"{member.mention} отправился на бэкап и не вернулся",
+        f"{member.mention} выключил дебаг-режим и исчез",
+        f"{member.mention} сбросил соединение",
+        f"{member.mention} ушёл в suspend mode",
+        f"{member.mention} поставил себя на cronjob раз в никогда",
+        f"{member.mention} выполнил kill -9 на своё соединение",
+        f"{member.mention} выключил логирование и пропал",
+        f"{member.mention} выполнил sudo poweroff",
+        f"{member.mention} был закоммичен, но не в этот репозиторий",
+        f"{member.mention} нашёл баг в жизни и отвалился",
+        f"{member.mention} вызвал undefined behavior и исчез",
+        f"{member.mention} словил kernel panic и завис",
+        f"{member.mention} запустил fork() без exec() и потерялся",
+        f"{member.mention} выполнил git reset --hard и исчез",
+        f"{member.mention} скомпилировался с ошибками и не запустился",
+        f"{member.mention} обновился и больше не поддерживает этот сервер",
+        f"{member.mention} вышел за пределы допустимого массива",
+        f"{member.mention} больше не поддерживается текущей версией жизни",
+        f"{member.mention} вызвал recursion() без выхода",
+        f"{member.mention} достиг предела итераций и завершился",
+        f"{member.mention} встретил unexpected token и пропал",
+        f"{member.mention} закрыл все вкладки и ушёл",
+        f"{member.mention} отключился из-за потери пакетов",
+        f"{member.mention} совершил force quit()",
+        f"{member.mention} превратился в zombie process",
+        f"{member.mention} вызвал delete this и исчез"
+    ]
+
+    await member.guild.system_channel.send(random.choice(messages))
 
 
 @client.event
@@ -325,7 +394,8 @@ async def change(interaction: Interaction, hex_color: str):
         return
 
     try:
-        r, g, b = (int(hex_color_redacted[x:x + 2], 16) for x in range(0, 6, 2))
+        r, g, b = (int(hex_color_redacted[x:x + 2], 16)
+                   for x in range(0, 6, 2))
         # Проходим по переданному цвету и преобразуем 16 основание в 10
     except:
         # Если что-то пошло не так
@@ -335,7 +405,8 @@ async def change(interaction: Interaction, hex_color: str):
     if roles:  # Если человек уже имеет цветную роль
         # Берём у него самую высокую в списке роль
         color_role = interaction.guild.get_role(roles[-1].id)
-        bot_role_pos = (interaction.guild.get_member(client.user.id).roles[-1].position)  # Позиция самой высокой роли бота
+        bot_role_pos = (interaction.guild.get_member(
+            client.user.id).roles[-1].position)  # Позиция самой высокой роли бота
         # Присваиваем роли цвет в ргб и позицию на 1 ниже роли бота
         await color_role.edit(color=nextcord.Color.from_rgb(r, g, b), position=bot_role_pos - 1)
 
@@ -411,6 +482,181 @@ async def waifu(
         return
     await interaction.response.send_message(f"|| {url} ||")
 
+
+@client.slash_command(name='mix', description='Mix two emojis')
+async def mix(
+    interaction: Interaction,
+    emoji_1: str,
+    emoji_2: str
+):
+    if emoji_1 not in emoji.EMOJI_DATA:
+        await interaction.response.send_message("Первый аргумент не является эмоджи!", ephemeral=True)
+        return
+
+    if emoji_2 not in emoji.EMOJI_DATA:
+        await interaction.response.send_message("Второй аргумент не является эмоджи!", ephemeral=True)
+        return
+
+    await interaction.response.send_message(f"https://emojik.vercel.app/s/{emoji_1}_{emoji_2}?size=48")
+
+
+def clean_last_word(word):
+    # Удаляет все не-буквенные символы в конце
+    return re.sub(r'\W+$', '', word)
+
+
+"""
+def generate_contextual_text(sentences=1):
+    text = []
+    
+    sentence = text_model.make_sentence(tries=100)
+    if sentence:
+        text.append(sentence)
+
+    for _ in range(sentences - 1):
+        words = text[-1].split() 
+        new_sentence = None
+
+        for i in range(len(words) - 1, -1, -1):
+            start_word = clean_last_word(words[i])
+            if start_word:
+                try:
+                    new_sentence = " ".join(text_model.make_sentence_with_start(start_word, strict=False, tries=100).split(' ')[1:])
+                    if new_sentence:
+                        break
+                except Exception:
+                    pass
+        
+        if not new_sentence:
+            new_sentence = text_model.make_sentence(tries=100) or ""
+        text.append(new_sentence)
+
+    return " ".join(text)
+"""
+
+
+async def generate(length: int,) -> str:
+    random_start_pair = random.choice(list(text_model.items()))
+    generated = [random_start_pair[0], random.choices(
+        [word for word, count in random_start_pair[1]],
+        [count for word, count in random_start_pair[1]]
+    )[0]]
+
+    i = 0
+    while i < length:
+        if generated[-1] in text_model:
+            next_word = random.choices(
+                [word for word, count in text_model[generated[-1]]],
+                [count for word, count in text_model[generated[-1]]]
+            )[0]
+            generated.append(next_word)
+        else:
+            generated.pop()
+            generated.pop()
+
+            if len(generated) == 0:
+                random_start_pair = random.choice(list(text_model.items()))
+                generated = [random_start_pair[0],
+                             random.choices(
+                             [word for word, count in random_start_pair[1]],
+                             [count for word, count in random_start_pair[1]]
+                             )[0]]
+                i = length
+        i += 1
+    return ' '.join(generated)
+
+
+@client.slash_command(name='neural_pepsi', guild_ids=[1176560233984831591])
+async def na(
+    interaction: Interaction,
+    words: int,
+):
+    if words > 500:
+        await interaction.response.send_message("Слишком много слов!", ephemeral=True)
+        return
+
+    if words <= 1:
+        await interaction.response.send_message("Количество слов должно быть больше 1", ephemeral=True)
+        return
+
+    await interaction.response.defer()
+    msg = await generate(words or 10)
+
+    if not msg:
+        await interaction.followup.send("Произошла ошибка при генерировании ответа", ephemeral=True)
+        return
+
+    await interaction.followup.send(msg[:1999])
+
+
+@client.slash_command(name='steal_emoji', description='Скопируйте эмоджи с одного сервера на другой! Формат <:name:id>')
+async def se(
+    interaction: Interaction,
+    emoji: str,
+):
+    if not emoji.startswith('<:') or not emoji.endswith('>'):
+        await interaction.response.send_message('Неправильный формат эмоджи!', ephemeral=True)
+        return
+
+    emoji_parts = emoji.replace('<:', '').replace('>', '').split(':')
+
+    if len(emoji_parts) != 2:
+        await interaction.response.send_message('Неправильный формат эмоджи!', ephemeral=True)
+        return
+
+    emoji_url = f"https://cdn.discordapp.com/emojis/{emoji_parts[1]}"
+    emoji_data = None
+
+    async with aiohttp.ClientSession() as session:
+        async with session.get(emoji_url + '.gif') as resp:
+            if resp.status == 200:
+                emoji_data = await resp.read()
+
+        if not emoji_data:
+            async with session.get(emoji_url + '.png') as resp:
+                if resp.status == 200:
+                    emoji_data = await resp.read()
+
+    if not emoji_data:
+        await interaction.response.send_message('Не удалось получить эмоджи! Возможно, указан неверный id', ephemeral=True)
+        return
+
+    try:
+        new_emoji = await interaction.guild.create_custom_emoji(name=emoji_parts[0], image=emoji_data)
+    except Exception:
+        await interaction.response.send_message('Не удалось создать эмоджи! Возможно, у бота нет прав на создание эмоджи', ephemeral=True)
+        return
+
+    embed = nextcord.Embed(
+        title="Эмоджи успешно скопировано",
+        description=f"Эмоджи {emoji} было успешно перенесено на сервер {interaction.guild.name}",
+        color=nextcord.Color.blue()
+    )
+    embed.set_author(name=emoji_parts[0], icon_url=new_emoji.url)
+
+    await interaction.response.send_message(embed=embed)
+
+
+@client.slash_command(name='nextjs', description='Generate Next.Js error badge')
+async def mi(
+    interaction: Interaction,
+    string: str,
+):
+    if not string:
+        await interaction.response.send_message('Строка не может быть пустой!', ephemeral=True)
+        return
+
+    if len(string) > 200:
+        await interaction.response.send_message('Строка слишком длинная', ephemeral=True)
+        return
+
+    mi = generate_mi(string)
+    mi = mi.resize((mi.width // 7, mi.height // 7))
+    image_bytes = io.BytesIO()
+    mi.save(image_bytes, format="PNG")
+    image_bytes.seek(0)
+
+    await interaction.response.send_message("", file=nextcord.File(fp=image_bytes, filename=f"{string}.png"))
 
 if __name__ == "__main__":
     client.run(API_TOKEN)

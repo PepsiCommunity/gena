@@ -1,5 +1,8 @@
 /nextcord
 /__pycache__
+/mi/__pycache__
 /.env
 /roles.json
 /docker*
+/messages.txt
+/model.json

@@ -6,3 +6,6 @@ Wikipedia-API
 yt_dlp
 youtube-search
 pynacl
+emoji
+markovify
+pillow
