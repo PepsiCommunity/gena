@@ -247,6 +247,14 @@ def check_forwarded(message: nextcord.Message):
 
 @client.event
 async def on_message(message: nextcord.Message):
+    lower_msg = message.content.lower()
+    ban_words = ['uwu', 'owo', '~']
+    duration = datetime.timedelta(hours=6)
+    for word in ban_words:
+        if re.search(word, lower_msg) is not None:
+            await message.author.timeout(duration, reason="Дурак")
+            return
+    
     if message.author == client.user:
         if message.channel.id in protected_chats:
             await message.delete()
