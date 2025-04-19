@@ -7,5 +7,5 @@ yt_dlp
 youtube-search
 pynacl
 emoji
-markovify
 pillow
+g4f[all]

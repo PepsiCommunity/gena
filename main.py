@@ -1,4 +1,6 @@
+import datetime
 import re
+from typing import Dict
 import nextcord
 from nextcord.ext import commands
 import os
@@ -8,7 +10,7 @@ from nextcord import Interaction, SlashOption
 from music import Music
 import random
 import json
-import time
+from ai.chat import Chat
 import aiohttp
 import asyncio
 import emoji
@@ -22,9 +24,6 @@ guild = nextcord.Guild
 client = commands.Bot(intents=nextcord.Intents.all())
 music_class: Music = Music(client)
 
-with open('model.json', 'r', encoding='utf-8') as f:
-    text_model = json.load(f)
-
 roles_channel_id = 1177321519169421393  # id канала ролей
 server_id = 1176560233984831591  # Id сервера
 likes_list = [
@@ -37,40 +36,9 @@ likes_list = [
 protected_chats = [1179153688632246282,
                    1176595296764055684, 1177500296918872074]
 voice_settings_id = 1177551237860839444
-
 roles = {"👍": 1176574853894115408, "❤️": 1269355401212727297}
-
-spamblock = {}
-
-
-class Guild_Spam_Protection:
-    def __init__(self, member_id):
-        self.member_id = member_id
-        self.start_time = time.time()
-        self.messages_count = 0
-
-
-descriptions = [
-    "Пора работать!",
-    "Created by AndcoolSystems",
-    "Я хочу услышать твой голос!",
-    "Почему реакций так мало?",
-    "А они сдались?",
-    "Гайс, ай хэв э бэд ньювс",
-    "Чебурашка выкурил весь косячок😢",
-    "Мне так и не принесли полотенце!",
-    "Пора помыться!",
-    "Время автомодерации!",
-    "Почему все молчат?",
-    "Я НЕ ЛЮБЛЮ КАПС!",
-    "ОБЩАТЬСЯ КАПСОМ – НИЗКО",
-    "Я не знаю рецепт пороха",
-    ":clueless:",
-    "Цветастые ники!",
-]
-
-
 voice_channels: dict[int, Voice] = {}
+chats: Dict[int, Chat] = {}
 
 
 @client.event
@@ -81,17 +49,6 @@ async def on_ready():
             type=nextcord.ActivityType.watching, name="телевизор и курит косячок"
         ),
     )
-    async with aiohttp.ClientSession("https://discord.com") as session:
-        await session.patch(
-            f"/api/v9/applications/@me",
-            json={"description": random.choice(descriptions)},
-            headers={
-                "Host": "discord.com",
-                "Authorization": "Bot " + os.getenv("TOKEN"),
-            },
-        )
-
-    print('Online')
 
 
 @client.event
@@ -259,8 +216,26 @@ async def on_message(message: nextcord.Message):
             deleted = True
 
     if message.channel.id in likes_list and not deleted:
+        emoji = client.get_emoji(1358422026867572908)
+        await message.add_reaction(emoji)
+        await asyncio.sleep(0.5)
         await message.add_reaction("\N{THUMBS UP SIGN}")
+        await asyncio.sleep(0.5)
         await message.add_reaction("\N{THUMBS DOWN SIGN}")
+
+    channel = message.channel
+    if isinstance(channel, nextcord.Thread):
+        if channel.owner == client.user and message.content:
+            chat = chats.get(channel.id, Chat(client, channel))
+
+            async with channel.typing():
+                response = await chat.message(f'{message.author.global_name}:{message.author.id}:{message.content}')
+                max_l = 1999
+                for i in range(0, len(response), max_l):
+                    if i == 0:
+                        await message.reply(response[i:i+max_l])
+                    else:
+                        await message.channel.send(response[i:i+max_l])
 
 
 @client.slash_command(description="Найти в Википедии")
@@ -499,94 +474,8 @@ async def mix(
 
     await interaction.response.send_message(f"https://emojik.vercel.app/s/{emoji_1}_{emoji_2}?size=48")
 
-
-def clean_last_word(word):
-    # Удаляет все не-буквенные символы в конце
-    return re.sub(r'\W+$', '', word)
-
-
-"""
-def generate_contextual_text(sentences=1):
-    text = []
-    
-    sentence = text_model.make_sentence(tries=100)
-    if sentence:
-        text.append(sentence)
-
-    for _ in range(sentences - 1):
-        words = text[-1].split() 
-        new_sentence = None
-
-        for i in range(len(words) - 1, -1, -1):
-            start_word = clean_last_word(words[i])
-            if start_word:
-                try:
-                    new_sentence = " ".join(text_model.make_sentence_with_start(start_word, strict=False, tries=100).split(' ')[1:])
-                    if new_sentence:
-                        break
-                except Exception:
-                    pass
-        
-        if not new_sentence:
-            new_sentence = text_model.make_sentence(tries=100) or ""
-        text.append(new_sentence)
-
-    return " ".join(text)
-"""
-
-
-async def generate(length: int,) -> str:
-    random_start_pair = random.choice(list(text_model.items()))
-    generated = [random_start_pair[0], random.choices(
-        [word for word, count in random_start_pair[1]],
-        [count for word, count in random_start_pair[1]]
-    )[0]]
-
-    i = 0
-    while i < length:
-        if generated[-1] in text_model:
-            next_word = random.choices(
-                [word for word, count in text_model[generated[-1]]],
-                [count for word, count in text_model[generated[-1]]]
-            )[0]
-            generated.append(next_word)
-        else:
-            generated.pop()
-            generated.pop()
-
-            if len(generated) == 0:
-                random_start_pair = random.choice(list(text_model.items()))
-                generated = [random_start_pair[0],
-                             random.choices(
-                             [word for word, count in random_start_pair[1]],
-                             [count for word, count in random_start_pair[1]]
-                             )[0]]
-                i = length
-        i += 1
-    return ' '.join(generated)
-
-
-@client.slash_command(name='neural_pepsi', guild_ids=[1176560233984831591])
-async def na(
-    interaction: Interaction,
-    words: int,
-):
-    if words > 500:
-        await interaction.response.send_message("Слишком много слов!", ephemeral=True)
-        return
-
-    if words <= 1:
-        await interaction.response.send_message("Количество слов должно быть больше 1", ephemeral=True)
-        return
-
-    await interaction.response.defer()
-    msg = await generate(words or 10)
-
-    if not msg:
-        await interaction.followup.send("Произошла ошибка при генерировании ответа", ephemeral=True)
-        return
-
-    await interaction.followup.send(msg[:1999])
+EXCLUDED_USERS = {707270170837778432, 472714545723342848,
+                  730885117656039466, 1299512869649645634, 1265743807626874890, 1177230100685660170, 280414197706391562}
 
 
 @client.slash_command(name='steal_emoji', description='Скопируйте эмоджи с одного сервера на другой! Формат <:name:id>')
@@ -658,5 +547,60 @@ async def mi(
 
     await interaction.response.send_message("", file=nextcord.File(fp=image_bytes, filename=f"{string}.png"))
 
-if __name__ == "__main__":
-    client.run(API_TOKEN)
+
+@client.slash_command(description="DeepSeek")
+async def ai(interaction: Interaction): ...
+
+
+@ai.subcommand(description="Start conversation")
+async def start(
+    interaction: Interaction,
+    instructions: str = SlashOption(
+        description="Системная инструкция боту (перезаписывает стандартную)",
+        required=False,
+        default=''
+    ),
+    is_private: bool = SlashOption(
+        description="Создавать приватную ветку?",
+        required=False,
+        default=False
+    )
+):
+    embed = nextcord.Embed(title="Новый чат создан")
+    embed.set_author(name=interaction.user.global_name,
+                     icon_url=interaction.user.avatar.url)
+
+    embed.add_field(name="Instructions",
+                    value=instructions or "Default",
+                    inline=False)
+
+    embed.add_field(name="Is private",
+                    value=is_private,
+                    inline=False)
+
+    await interaction.send(embed=embed, ephemeral=is_private)
+    thread = await interaction.channel.create_thread(
+        name="AI conversation",
+        type=nextcord.ChannelType.private_thread if is_private else nextcord.ChannelType.public_thread
+    )
+    await thread.add_user(interaction.user)
+
+    chats[thread.id] = Chat(client, thread)
+    chat = chats.get(thread.id)
+
+    async with thread.typing():
+        chat.start_chat(
+            instructions or f"Ты – искусственный интеллект на дискорд сервере, который называется {interaction.guild.name}. " +
+            "Можешь отвечать как угодно, а так же использовать Markdown. " +
+            "Кстати, тебя зовут Гена. Поддерживай диалог в любом случае. И помни, мы любим тебя! "
+        )
+    response = await chat.message(f'{interaction.user.global_name}:{interaction.user.id}:Привет!')
+    await thread.send(response)
+
+
+def run_bot():
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(client.start(API_TOKEN))
+
+
+run_bot()

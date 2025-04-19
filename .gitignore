@@ -6,3 +6,7 @@
 /docker*
 /messages.txt
 /model.json
+/memory.json
+/ai/chats
+/ai/__pycache__
+/har_and_cookies
