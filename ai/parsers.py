@@ -2,7 +2,7 @@ import re
 from typing import Union
 
 
-def parse_docstring(doc_string: Union[str, None]) -> dict[str, dict]:
+def parse_docstring(doc_string: str) -> tuple[str, dict]:
     # 0 - description
     # 1 - args
     # 2 - returns
@@ -15,7 +15,7 @@ def parse_docstring(doc_string: Union[str, None]) -> dict[str, dict]:
             state = 1
             continue
 
-        if 'Returns' in line.strip().lower():
+        if 'returns' in line.strip().lower():
             state = 2
             continue
 
@@ -46,4 +46,15 @@ def parse_docstring(doc_string: Union[str, None]) -> dict[str, dict]:
 
 def build_tool(func) -> dict:
     description, args = parse_docstring(func.__doc__)
-    return f'Function name: {func.__name__}\nDescription: {description}\nArgs: {args}'
+    return {
+        "type": "function",
+        "function": {
+            "name": func.__name__,
+            "description": description,
+            "required": list(args.keys()),
+            "parameters": {
+                "type": "object",
+                "properties": args
+            }
+        }
+    }

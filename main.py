@@ -80,6 +80,15 @@ async def on_member_join(member: nextcord.Member):
             except:
                 pass
 
+    system_channel = member.guild.system_channel
+    message = await Chat(client, system_channel).single_message(
+        {
+            'role': 'system',
+            'content': f'К нашему серверу присоединился новый участник `{member.global_name}`, встреть его теплыми словами'
+        }
+    )
+    await system_channel.send(f'{member.mention} {message}')
+
 
 @client.event
 async def on_member_remove(member: nextcord.Member):
@@ -229,7 +238,11 @@ async def on_message(message: nextcord.Message):
             chat = chats.get(channel.id, Chat(client, channel))
 
             async with channel.typing():
-                response = await chat.message(f'{message.author.global_name}:{message.author.id}:{message.content}')
+                reply_mess = ''
+                if message.reference:
+                    r = await message.channel.fetch_message(message.reference.message_id)
+                    reply_mess = f'<Replies to {r.author.global_name}\'s message> '
+                response = await chat.message(f'{message.author.global_name}:{message.author.id}:{reply_mess}{message.content}')
                 max_l = 1999
                 for i in range(0, len(response), max_l):
                     if i == 0:
@@ -550,6 +563,27 @@ async def mi(
 
 @client.slash_command(description="DeepSeek")
 async def ai(interaction: Interaction): ...
+
+
+@ai.subcommand(description="Deletes current chat")
+async def delete(interaction: Interaction):
+
+    channel = interaction.channel
+    if not isinstance(channel, nextcord.Thread):
+        await interaction.send('**[ERROR]**: Это не ветка!')
+        return
+
+    if channel.owner != client.user:
+        await interaction.send('**[ERROR]**: Эта ветка не принадлежит боту!')
+        return
+
+    chat = chats.get(interaction.channel.id, Chat(client, channel))
+    try:
+        chat.end_chat()
+    except Exception as e:
+        await interaction.send(f'**[ERROR]**: Не удалось удалить историю: {e}!')
+        return
+    await channel.delete()
 
 
 @ai.subcommand(description="Start conversation")

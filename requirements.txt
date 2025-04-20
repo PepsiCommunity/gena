@@ -8,4 +8,4 @@ youtube-search
 pynacl
 emoji
 pillow
-g4f[all]
+openai

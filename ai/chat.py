@@ -1,11 +1,10 @@
 import json
-import re
-import g4f
-from g4f.client import AsyncClient
+import os
+import aiohttp
 import nextcord
 from nextcord.ext import commands
 from typing import List
-
+import openai
 from ai.parsers import build_tool
 
 
@@ -15,13 +14,18 @@ class Chat:
 
         self.bot = bot
         self.thread = thread
-        self.model = g4f.models.deepseek_v3
         self.history_path = f'./ai/chats/{self.thread.id}.json'
-        self.client = AsyncClient(
-            provider=self.model.best_provider
+        self.client = openai.OpenAI(
+            api_key=os.environ.get("OAI"),
+            base_url=os.environ.get("OAI_PROXY")
         )
-        self.tools = [reprocess, greet, change_chat_name,
-                      get_server_channels, read_messages, save_data, get_data]
+        self.tools = [
+            change_chat_name,
+            get_server_channels,
+            read_messages, save_data,
+            get_data, get_user_info,
+            get_server_users
+        ]
 
     def _read(self) -> List[dict]:
         """Read chat history from file"""
@@ -63,14 +67,6 @@ class Chat:
                 }
             )
 
-        tools = '\n\n'.join(map(build_tool, self.tools))
-        data.append(
-            {
-                'role': 'system',
-                'content': tools
-            }
-        )
-
         data.append(
             {
                 'role': 'system',
@@ -78,28 +74,6 @@ class Chat:
             }
         )
         self._write(data)
-
-    def parse_message(self, message: str):
-        print(message)
-        function_pattern = r'<call function="(\S+)"(?: args=(?:"({[^}]*})"|({[^}]*})))?\s*/>'
-        functions = []
-        matches = re.findall(function_pattern, message.replace("'", '"'))
-
-        for func_name, quoted_args, raw_args in matches:
-            args_str = quoted_args or raw_args
-            try:
-                args = json.loads(args_str)
-            except json.JSONDecodeError:
-                args = {}
-            functions.append({
-                "function_name": func_name,
-                "args": args
-            })
-
-        text = re.sub(function_pattern, '', message.replace("'", '"')).strip()
-        pattern = r'Started thinking\.\.\..*?Done in .*?s\.'
-        cleaned = re.sub(pattern, '', text, flags=re.DOTALL).strip()
-        return cleaned, functions
 
     def get_tool(self, name: str):
         """Get tool by name"""
@@ -109,68 +83,87 @@ class Chat:
                 return tool
         return None
 
-    async def message(self, message: str, depth: int = 0):
-        if depth > 2:
-            return message
-
-        history = self._read()
-        history.append({
-            'role': 'user',
-            'content': message
-        })
-        self._write(history)
-
-        response_json = await self.client.chat.completions.create(
-            messages=history,
-            model=self.model.name
+    async def single_message(self, message: dict) -> str:
+        response_json = self.client.chat.completions.create(
+            model="gpt-4",
+            messages=[message],
         )
+        return response_json.choices[0].message.content
 
-        content = response_json.choices[0].message.content
-        text, tools = self.parse_message(content)
+    async def message(self, message: str):
+        history = self._read()
 
-        _tools_results = {}
-        for tool in tools:
-            try:
-                print(f'calling {tool}')
-                name = tool['function_name']
-                _tool = self.get_tool(name)
-                if not _tool:
-                    _tools_results[name] = 'Function not found'
-
-                _tools_results[name] = str(await _tool(self, **tool['args']))
-            except Exception as e:
-                _tools_results[name] = str(e)
-                print(f'Cannot call tool {tool}: {e}')
-
-        history.append({
-            'role': 'assistant',
-            'content': text
-        })
-
-        if any([x != 'None' for x in _tools_results.values()]):
-            return await self.message(str(_tools_results), depth=depth + 1)
-        elif _tools_results:
+        if message:
             history.append({
-                'role': 'user',
-                'content': str(_tools_results)
+                "role": "user",
+                "content": message
             })
 
         self._write(history)
-        return text
 
+        response_json = self.client.chat.completions.create(
+            model="gpt-4",
+            messages=history,
+            tools=[build_tool(t) for t in self.tools],
+            tool_choice="auto"
+        )
+        response = response_json.choices[0].message
 
-async def greet(chat: Chat, user: str):
-    """
-        Greet user by name
+        if response.tool_calls:
+            history.append({
+                "role": "assistant",
+                "tool_calls": [
+                    {
+                        "id": call.id,
+                        "type": call.type,
+                        "function": {
+                            "name": call.function.name,
+                            "arguments": call.function.arguments
+                        }
+                    } for call in response.tool_calls
+                ],
+                "content": None
+            })
 
-        Args:
-            user (string): The user name to greet
+            for call in response.tool_calls:
+                try:
+                    print(
+                        f"Calling tool: {call.function.name} with args {call.function.arguments}"
+                    )
+                    tool_fn = self.get_tool(call.function.name)
+                    args = json.loads(call.function.arguments)
+                    result = str(await tool_fn(self, **args))
 
-        Returns:
-            None
+                    history.append({
+                        "role": "tool",
+                        "tool_call_id": call.id,
+                        "content": result
+                    })
 
-    """
-    print(f'Greet, {user}')
+                except Exception as e:
+                    print(f"Error calling tool {call.function.name}: {e}")
+                    history.append({
+                        "role": "tool",
+                        "tool_call_id": call.id,
+                        "content": f"Error calling tool: {e}"
+                    })
+
+            response_json = self.client.chat.completions.create(
+                model="gpt-4",
+                messages=history
+            )
+            response = response_json.choices[0].message
+
+        history.append({
+            "role": "assistant",
+            "content": response.content
+        })
+
+        self._write(history)
+        return response.content
+
+    def end_chat(self):
+        os.remove(self.history_path)
 
 
 async def change_chat_name(chat: Chat, name: str):
@@ -215,60 +208,44 @@ async def get_server_channels(chat: Chat):
     return channels
 
 
-async def save_data(chat: Chat, user: str, data: str):
+async def save_data(chat: Chat, data: str):
     """
         Save some data globally
 
         Args:
-            user (str): User id, whom the data to save
-            data (str): Data to save
+            data (string): Data to save
 
         Returns:
             None
 
     """
-    d = {}
-    try:
-        with open('memory.json', 'r', encoding='utf-8') as f:
-            d = json.load(f)
-    except FileNotFoundError:
-        d = {}
-
-    if user not in d:
-        d[user] = []
-    d[user].append(data)
-
-    with open('memory.json', 'w', encoding='utf-8') as f:
-        json.dump(d, f, ensure_ascii=False, indent=4)
+    with open('memory.txt', 'a', encoding='utf-8') as f:
+        f.write(data + '\n')
 
 
-async def get_data(chat: Chat, user: str):
+async def get_data(chat: Chat):
     """
         Get all globally saved data between chats
 
         Args:
-            user (str): User id, whom the data to read
+            -
 
         Returns:
             str - All saved data
 
     """
 
-    with open('memory.json', 'r', encoding='utf-8') as f:
-        return json.load(f).get(user, [])
-    return []
+    with open('memory.txt', 'r', encoding='utf-8') as f:
+        return f.read()
 
 
-async def read_messages(chat: Chat, chat_name: str):
+async def read_messages(chat: Chat, chat_name: str, count: int):
     """
-        Read last 10 messages from the specified chat
+        Read last `count` messages from the specified chat
 
         Args:
-            chat_name (str): Name of the target chat
-
-        Returns:
-            list: List names of latest 10 messages
-
+            chat_name (string): Name of the target chat
+            count (integer): Count of messages to read. 0 < count < 50
     """
     _channel = None
     for channel in chat.thread.guild.channels:
@@ -278,18 +255,50 @@ async def read_messages(chat: Chat, chat_name: str):
     if not _channel:
         raise Exception('Channel not found')
 
-    return list(reversed([message.content for message in await _channel.history(limit=10).flatten()]))
+    return list(reversed([
+        f'{message.author.global_name}:{message.author.id}:{message.content}'
+        for message in await _channel.history(limit=min(max(count, 0), 50)).flatten()
+    ]))
 
 
-async def reprocess(chat: Chat):
+async def get_user_info(chat: Chat, id: str):
     """
-        Send back a message with the results of calling other functions
+    Get info about user: name, name on server, id, bio
 
-        Args:
-            -
-
-        Returns:
-            Other function call results
+    Args:
+        id (string): User id
 
     """
-    ...
+    async with aiohttp.ClientSession() as session:
+        async with session.get(
+            url=f'https://discord.com/api/v9/users/{id}/profile?guild_id={chat.thread.guild.id}',
+            headers={
+                'Authorization': f'{os.environ.get("USER_TOKEN")}'
+            }
+        ) as resp:
+            if resp.status != 200:
+                raise Exception(
+                    'Could not get data about user! User not found')
+
+            response: dict = await resp.json()
+            user: dict = response.get('user', {})
+            global_name: str = user.get('global_name', '')
+            return {
+                "id": id,
+                "bio": user.get('bio', ''),
+                "global_name": global_name,
+                "server_name": response.get('guild_member', {}).get('nick', global_name),
+                "pronouns": response.get('user_profile', {}).get('pronouns', '')
+            }
+
+
+async def get_server_users(chat: Chat):
+    """
+    Get list of server's members
+
+    Args:
+        -
+
+    """
+
+    return [f'{member.global_name}:{member.id}' async for member in chat.thread.guild.fetch_members(limit=50)]
