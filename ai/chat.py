@@ -6,6 +6,7 @@ from nextcord.ext import commands
 from typing import List
 import openai
 from ai.parsers import build_tool
+from fuzzywuzzy import process
 
 
 class Chat:
@@ -15,7 +16,7 @@ class Chat:
         self.bot = bot
         self.thread = thread
         self.history_path = f'./ai/chats/{self.thread.id}.json'
-        self.client = openai.OpenAI(
+        self.client = openai.AsyncOpenAI(
             api_key=os.environ.get("OAI"),
             base_url=os.environ.get("OAI_PROXY")
         )
@@ -24,7 +25,8 @@ class Chat:
             get_server_channels,
             read_messages, save_data,
             get_data, get_user_info,
-            get_server_users
+            get_server_users, get_server_emotes,
+            get_emote_description, get_all_emote_descriptions
         ]
 
     def _read(self) -> List[dict]:
@@ -53,7 +55,7 @@ class Chat:
         with open(self.history_path, 'w', encoding='utf-8') as f:
             f.write(json.dumps(data, indent=4, ensure_ascii=False))
 
-    def start_chat(self, instructions: str):
+    def start_chat(self, base_instruction: str, instructions: str):
         """Start new chat"""
 
         data = self._read()
@@ -70,9 +72,17 @@ class Chat:
         data.append(
             {
                 'role': 'system',
-                'content': instructions
+                'content': base_instruction
             }
         )
+        if instructions:
+            data.append(
+                {
+                    'role': 'system',
+                    'content': instructions
+                }
+            )
+
         self._write(data)
 
     def get_tool(self, name: str):
@@ -84,14 +94,18 @@ class Chat:
         return None
 
     async def single_message(self, message: dict) -> str:
-        response_json = self.client.chat.completions.create(
+        response_json = await self.client.chat.completions.create(
             model="gpt-4",
             messages=[message],
         )
         return response_json.choices[0].message.content
 
-    async def message(self, message: str):
-        history = self._read()
+    async def message(self, message: str | None = None, deep: int = 1, history: list | None = None):
+        if deep > 5:
+            return f'Max recursion depth reached: {deep}'
+
+        if history is None:
+            history = self._read()
 
         if message:
             history.append({
@@ -101,14 +115,14 @@ class Chat:
 
         self._write(history)
 
-        response_json = self.client.chat.completions.create(
+        response_json = await self.client.chat.completions.create(
             model="gpt-4",
             messages=history,
             tools=[build_tool(t) for t in self.tools],
             tool_choice="auto"
         )
-        response = response_json.choices[0].message
 
+        response = response_json.choices[0].message
         if response.tool_calls:
             history.append({
                 "role": "assistant",
@@ -128,8 +142,7 @@ class Chat:
             for call in response.tool_calls:
                 try:
                     print(
-                        f"Calling tool: {call.function.name} with args {call.function.arguments}"
-                    )
+                        f"Calling tool: {call.function.name} with args {call.function.arguments}")
                     tool_fn = self.get_tool(call.function.name)
                     args = json.loads(call.function.arguments)
                     result = str(await tool_fn(self, **args))
@@ -148,11 +161,8 @@ class Chat:
                         "content": f"Error calling tool: {e}"
                     })
 
-            response_json = self.client.chat.completions.create(
-                model="gpt-4",
-                messages=history
-            )
-            response = response_json.choices[0].message
+            self._write(history)
+            return await self.message(None, deep + 1, history)
 
         history.append({
             "role": "assistant",
@@ -177,7 +187,7 @@ async def change_chat_name(chat: Chat, name: str):
             None
 
     """
-    await chat.thread.edit(name=f'[AI] {name[:50]}')
+    await chat.thread.edit(name=f'「AI」{name[:50]}')
 
 
 async def get_server_channels(chat: Chat):
@@ -302,3 +312,65 @@ async def get_server_users(chat: Chat):
     """
 
     return [f'{member.global_name}:{member.id}' async for member in chat.thread.guild.fetch_members(limit=50)]
+
+
+async def get_server_emotes(chat: Chat):
+    """
+    Get list of server's emotes
+
+    Args:
+        -
+
+    """
+    emojis = []
+    for emoji in chat.thread.guild.emojis:
+        e: nextcord.Emoji = emoji
+        emojis.append({
+            "id": e.id,
+            "name": e.name,
+        })
+    return emojis
+
+
+async def get_emote_description(chat: Chat, name: str):
+    """
+    Get emote description by name
+
+    Args:
+        name (string): Name of emote
+
+    """
+
+    with open('./ai/emotes_description.json') as f:
+        emotes: dict = json.load(f)
+
+    result, accuracy = process.extractOne(name.lower(), list(emotes.keys()))
+    if accuracy <= 60:
+        raise Exception('Emote not found')
+
+    emote: dict = emotes[result]
+    return {
+        "id": emote.get('id'),
+        "name": result,
+        "name_accuracy": accuracy,
+        "description": emote.get('description', '')
+    }
+
+
+async def get_all_emote_descriptions(chat: Chat):
+    """
+    Get all emotes descriptions
+
+    Args:
+        -
+
+    """
+
+    with open('./ai/emotes_description.json') as f:
+        emotes: dict = json.load(f)
+
+    return [{
+        "id": emotes.get(emote, {}).get('id', ''),
+        "name": emote,
+        "description": emotes.get(emote, {}).get('description', '')
+    } for emote in emotes]

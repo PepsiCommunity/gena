@@ -9,3 +9,4 @@ pynacl
 emoji
 pillow
 openai
+fuzzywuzzy

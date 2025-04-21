@@ -234,7 +234,7 @@ async def on_message(message: nextcord.Message):
 
     channel = message.channel
     if isinstance(channel, nextcord.Thread):
-        if channel.owner == client.user and message.content:
+        if channel.owner == client.user:
             chat = chats.get(channel.id, Chat(client, channel))
 
             async with channel.typing():
@@ -242,7 +242,8 @@ async def on_message(message: nextcord.Message):
                 if message.reference:
                     r = await message.channel.fetch_message(message.reference.message_id)
                     reply_mess = f'<Replies to {r.author.global_name}\'s message> '
-                response = await chat.message(f'{message.author.global_name}:{message.author.id}:{reply_mess}{message.content}')
+
+                response = await chat.message(f'{message.author.global_name}:{message.author.id}:{reply_mess}{message.content or "<attachment>"}')
                 max_l = 1999
                 for i in range(0, len(response), max_l):
                     if i == 0:
@@ -614,7 +615,7 @@ async def start(
 
     await interaction.send(embed=embed, ephemeral=is_private)
     thread = await interaction.channel.create_thread(
-        name="AI conversation",
+        name="「AI」Conversation",
         type=nextcord.ChannelType.private_thread if is_private else nextcord.ChannelType.public_thread
     )
     await thread.add_user(interaction.user)
@@ -624,9 +625,9 @@ async def start(
 
     async with thread.typing():
         chat.start_chat(
-            instructions or f"Ты – искусственный интеллект на дискорд сервере, который называется {interaction.guild.name}. " +
-            "Можешь отвечать как угодно, а так же использовать Markdown. " +
-            "Кстати, тебя зовут Гена. Поддерживай диалог в любом случае. И помни, мы любим тебя! "
+            base_instruction=f"Ты – искусственный интеллект на дискорд сервере, который называется {interaction.guild.name}. " +
+            "В своих ответах можешь использовать Markdown. Тебя зовут Гена. Поддерживай диалог в любом случае.",
+            instructions=instructions
         )
     response = await chat.message(f'{interaction.user.global_name}:{interaction.user.id}:Привет!')
     await thread.send(response)
