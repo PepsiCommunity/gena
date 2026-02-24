@@ -1,0 +1,14 @@
+/nextcord
+/__pycache__
+/mi/__pycache__
+/.env
+/roles.json
+/docker*
+/messages.txt
+/model.json
+/memory.txt
+/ai/chats
+/ai/__pycache__
+/glitch/__pycache__
+/har_and_cookies
+/.vscode
